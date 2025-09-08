@@ -67,25 +67,36 @@ class UR5Model:
         
         # 获取关节ID
         self.joint_ids = []
-        for joint_name in self.joint_names:
-            joint_id = p.getJointInfo(self.robot_id, joint_name, physicsClientId=physics_client_id)[0]
-            self.joint_ids.append(joint_id)
+        num_joints = p.getNumJoints(self.robot_id, physicsClientId=physics_client_id)
+        
+        for i in range(num_joints):
+            joint_info = p.getJointInfo(self.robot_id, i, physicsClientId=physics_client_id)
+            joint_name = joint_info[1].decode('utf-8')
+            if joint_name in self.joint_names:
+                self.joint_ids.append(i)
             
         # 设置初始关节位置
-        self.reset_joints()
+        self.reset_joints(physics_client_id=physics_client_id)
         
-    def reset_joints(self, joint_positions: np.ndarray = None):
+    def reset_joints(self, joint_positions: np.ndarray = None, physics_client_id: int = None):
         """
         重置关节位置
         
         Args:
             joint_positions: 目标关节位置，如果为None则设为0
+            physics_client_id: PyBullet客户端ID
         """
         if joint_positions is None:
             joint_positions = np.zeros(self.num_joints)
             
         for i, joint_id in enumerate(self.joint_ids):
-            p.resetJointState(self.robot_id, joint_id, joint_positions[i])
+            p.resetJointState(
+                self.robot_id, 
+                joint_id, 
+                joint_positions[i],
+                targetVelocity=0.0,
+                physicsClientId=physics_client_id
+            )
             
         self.joint_positions = joint_positions.copy()
         
@@ -126,6 +137,9 @@ class UR5Model:
                 joint_id,
                 p.POSITION_CONTROL,
                 targetPosition=joint_positions[i],
+                force=500,  # 增加最大力矩
+                positionGain=0.1,  # 位置增益
+                velocityGain=1.0,  # 速度增益
                 physicsClientId=physics_client_id
             )
             
@@ -142,13 +156,14 @@ class UR5Model:
         """
         # 获取末端执行器链接状态
         link_state = p.getLinkState(self.robot_id, self.joint_ids[-1], physicsClientId=physics_client_id)
+        print(self.joint_ids[-1])
         position = np.array(link_state[0])
         orientation = p.getEulerFromQuaternion(link_state[1])
         
         return position, orientation
         
     def set_end_effector_pose(self, target_position: np.ndarray, target_orientation: np.ndarray, 
-                             physics_client_id: int, max_iterations: int = 100):
+                             physics_client_id: int, max_iterations: int = 1000):
         """
         设置末端执行器位姿（使用逆运动学）
         
@@ -164,13 +179,12 @@ class UR5Model:
         # 计算逆运动学
         joint_positions = p.calculateInverseKinematics(
             self.robot_id,
-            self.joint_ids[-1],
+            self.joint_ids[-1] - 1,
             target_position,
-            target_quat,
-            jointDamping=[0.01] * self.num_joints,
-            physicsClientId=physics_client_id
+            target_orientation
+
         )
-        
+        print(joint_positions)
         # 设置关节位置
         self.set_joint_positions(joint_positions, physics_client_id)
         

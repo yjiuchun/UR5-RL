@@ -7,13 +7,21 @@ import numpy as np
 import time
 from envs.ur5_assembly_env import UR5AssemblyEnv
 from utils.visualization import plot_joint_trajectory, plot_assembly_progress
+import cv2
+import pybullet as p
 
 def test_basic_functionality():
     """测试环境基本功能"""
     print("=== 测试环境基本功能 ===")
     
-    # 创建环境
-    env = UR5AssemblyEnv(render_mode="human", max_steps=500)
+    # 创建环境，可选择是否启用相机视图
+    show_camera = input("是否启用相机实时视图？(y/n): ").lower().startswith('y')
+    
+    env = UR5AssemblyEnv(
+        render_mode="human", 
+        max_steps=500,
+        show_camera_view=show_camera
+    )
     
     print(f"动作空间: {env.action_space}")
     print(f"观测空间: {env.observation_space}")
@@ -38,13 +46,15 @@ def test_basic_functionality():
         # 记录历史
         joint_history.append(obs['joint_state'])
         task_history.append(info)
+
+        print(obs['joint_state'])
         
         print(f"步骤 {step}: 奖励={reward:.3f}, 完成={terminated}, 质量={info['assembly_quality']:.3f}")
         
         if terminated or truncated:
             break
             
-        time.sleep(0.1)  # 减慢仿真速度
+        time.sleep(0.1)  # 减慢仿真速度 
     
     # 可视化结果
     joint_history = np.array(joint_history)
@@ -92,6 +102,31 @@ def test_camera_functionality():
     
     # 测试RGB相机
     env_rgb = UR5AssemblyEnv(render_mode="rgb_array", max_steps=100)
+
+    # 测试相机视图
+    # 创建OpenCV窗口
+    cv2.namedWindow("Camera View", cv2.WINDOW_NORMAL)
+    
+    # 测试不同的相机位置
+    camera_positions = [
+        {"name": "俯视角度", "pos": [0, 0, 20], "target": [0, 0, 0]},
+        {"name": "侧视角度", "pos": [1, 0, 10], "target": [0, 0, 0]},
+        {"name": "前视角度", "pos": [0, -1, 1], "target": [0, 0, 0]},
+        {"name": "45度俯视", "pos": [0.5, 0.5, 1.5], "target": [0, 0, 0]}
+    ]
+    
+    for i, view in enumerate(camera_positions):
+        print(f"\n=== 测试 {i+1}: {view['name']} ===")
+        print(f"相机位置: {view['pos']}")
+        print(f"相机目标: {view['target']}")
+
+        env_rgb.camera.set_camera_pose(view['pos'], view['target'])
+        cv2.imshow("Camera View", env_rgb.camera.get_rgb_image(env_rgb.physics_client_id))
+        cv2.waitKey(1)
+        print("图像已显示，按任意键继续到下一个位置...")
+        input()
+
+
     obs, info = env_rgb.reset()
     
     if 'camera' in obs:
@@ -193,6 +228,7 @@ def test_environment_info():
         print(f"  {key}: {value}")
     
     env.close()
+    
 
 def main():
     """主函数"""
@@ -202,8 +238,8 @@ def main():
         # 基本功能测试
         test_basic_functionality()
         
-        # 不同动作类型测试
-        test_different_action_types()
+        # # 不同动作类型测试
+        # test_different_action_types()
         
         # 相机功能测试
         test_camera_functionality()

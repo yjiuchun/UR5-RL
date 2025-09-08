@@ -30,9 +30,9 @@ class Camera:
         )
         
         # 相机位置和方向
-        self.camera_position = np.array([0.5, 0.0, 0.8])
+        self.camera_position = np.array([0.0, 0.0, 0.8])
         self.camera_target = np.array([0.0, 0.0, 0.0])
-        self.camera_up = np.array([0.0, 0.0, 1.0])
+        self.camera_up = np.array([0.0, 0.0, 1.0])  # Z轴向上
         
     def set_camera_pose(self, position: np.ndarray, target: np.ndarray, up: np.ndarray = None):
         """
@@ -43,10 +43,17 @@ class Camera:
             target: 相机目标点 [x, y, z]
             up: 相机上方向 [x, y, z]
         """
-        self.camera_position = np.array(position)
-        self.camera_target = np.array(target)
+        self.camera_position = np.array(position, dtype=np.float64)
+        self.camera_target = np.array(target, dtype=np.float64)
         if up is not None:
-            self.camera_up = np.array(up)
+            self.camera_up = np.array(up, dtype=np.float64)
+        else:
+            self.camera_up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+            
+        # 强制重新计算投影矩阵以确保更新
+        self.projection_matrix = p.computeProjectionMatrixFOV(
+            self.fov, self.aspect, self.near, self.far
+        )
             
     def get_view_matrix(self) -> np.ndarray:
         """
@@ -60,7 +67,15 @@ class Camera:
             self.camera_target,
             self.camera_up
         )
-        return np.array(view_matrix).reshape(4, 4)
+        return np.array(view_matrix)
+        
+    def debug_camera_info(self):
+        """调试相机信息"""
+        print(f"相机位置: {self.camera_position}")
+        print(f"相机目标: {self.camera_target}")
+        print(f"相机上方向: {self.camera_up}")
+        print(f"视场角: {self.fov}")
+        print(f"分辨率: {self.width}x{self.height}")
         
     def get_rgb_image(self, physics_client_id: int) -> np.ndarray:
         """

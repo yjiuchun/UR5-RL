@@ -6,11 +6,17 @@ from gymnasium import spaces
 from typing import Dict, Tuple, Optional, Any
 import time
 import os
-
+import pybullet_data
 from models.ur5_model import UR5Model
 from sensors.camera import Camera
 from sensors.joint_sensor import JointSensor
 from tasks.assembly_task import AssemblyTask
+
+
+# UR5_URDF_PATH = '/home/yjc/Project/UR5-RL/examples/UR5_Robotiq85_description/src/ur5_description/urdf/ur5_robotiq_85.urdf'
+UR5_URDF_PATH = '/home/yjc/Project/UR5-RL/models/ur5e/ur5e.urdf'
+
+
 
 class UR5AssemblyEnv(gym.Env):
     """UR5机械臂轴孔装配强化学习环境"""
@@ -20,7 +26,8 @@ class UR5AssemblyEnv(gym.Env):
                  camera_width: int = 640,
                  camera_height: int = 480,
                  max_steps: int = 1000,
-                 action_type: str = "joint_position"):
+                 action_type: str = "joint_position",
+                 show_camera_view: bool = False):
         """
         初始化环境
         
@@ -30,6 +37,7 @@ class UR5AssemblyEnv(gym.Env):
             camera_height: 相机图像高度
             max_steps: 最大步数
             action_type: 动作类型 ("joint_position", "end_effector_pose", "joint_velocity")
+            show_camera_view: 是否显示相机实时画面
         """
         super().__init__()
         
@@ -38,6 +46,7 @@ class UR5AssemblyEnv(gym.Env):
         self.camera_height = camera_height
         self.max_steps = max_steps
         self.action_type = action_type
+        self.show_camera_view = show_camera_view
         
         # 物理仿真
         self.physics_client_id = None
@@ -47,7 +56,7 @@ class UR5AssemblyEnv(gym.Env):
         self.ur5_model = None
         self.camera = None
         self.joint_sensor = None
-        
+        self.table = None
         # 任务
         self.assembly_task = None
         
@@ -55,9 +64,18 @@ class UR5AssemblyEnv(gym.Env):
         self.current_step = 0
         self.previous_task_state = None
         
+        # 相机视图窗口
+        self.camera_window_name = None
+        if self.show_camera_view:
+            import cv2
+            self.camera_window_name = "UR5 Camera View"
+            cv2.namedWindow(self.camera_window_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(self.camera_window_name, self.camera_width, self.camera_height)
+        
         # 动作和观测空间
         self._setup_spaces()
-        
+
+
         # 初始化环境
         self._initialize_environment()
         
@@ -142,16 +160,22 @@ class UR5AssemblyEnv(gym.Env):
         p.setGravity(0, 0, -9.81, physicsClientId=self.physics_client_id)
         p.setTimeStep(self.time_step, physicsClientId=self.physics_client_id)
         p.setRealTimeSimulation(0, physicsClientId=self.physics_client_id)
-        
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
+
         # 加载地面
         p.loadURDF(
             os.path.join(pybullet_data.getDataPath(), "plane.urdf"),
             physicsClientId=self.physics_client_id
         )
+
+        # 加载桌子
+        self.table = p.loadURDF("table/table.urdf", basePosition=[0.5, 0, 0.0],baseOrientation=p.getQuaternionFromEuler([0, 0, 0]))
+
+
         
         # 初始化机械臂
-        self.ur5_model = UR5Model()
-        self.ur5_model.load(self.physics_client_id)
+        self.ur5_model = UR5Model(UR5_URDF_PATH)
+        self.ur5_model.load(self.physics_client_id,base_position=[0, 0.0, 0.63],base_orientation=[0, 0, 0])
         
         # 初始化传感器
         self.camera = Camera(self.camera_width, self.camera_height)
@@ -163,8 +187,8 @@ class UR5AssemblyEnv(gym.Env):
         
         # 设置相机位置
         self.camera.set_camera_pose(
-            position=[0.5, 0.0, 0.8],
-            target=[0.0, 0.0, 0.0]
+            position=[0.0, 0.75, 2.0],
+            target=[0.0001, 0.75, 0.0]
         )
         
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[Dict, Dict]:
@@ -200,6 +224,10 @@ class UR5AssemblyEnv(gym.Env):
         for _ in range(100):
             p.stepSimulation(physicsClientId=self.physics_client_id)
             
+        # 更新相机视图（如果启用）
+        if self.show_camera_view:
+            self._update_camera_view()
+            
         # 获取初始观测
         observation = self._get_observation()
         info = self._get_info()
@@ -224,10 +252,14 @@ class UR5AssemblyEnv(gym.Env):
         self._execute_action(action)
         
         # 仿真步进
-        for _ in range(10):  # 每个动作执行多个仿真步
+        for _ in range(100):  # 每个动作执行多个仿真步
             p.stepSimulation(physicsClientId=self.physics_client_id)
             if self.render_mode == "human":
                 time.sleep(self.time_step)
+                
+        # 更新相机视图（如果启用）
+        if self.show_camera_view:
+            self._update_camera_view()
                 
         # 获取当前状态
         current_task_state = self.assembly_task.get_task_state()
@@ -280,6 +312,7 @@ class UR5AssemblyEnv(gym.Env):
         """获取观测"""
         # 关节状态
         joint_states = self.joint_sensor.get_joint_states(self.physics_client_id)
+
         joint_obs = np.concatenate([
             joint_states['positions'],
             joint_states['velocities'],
@@ -346,6 +379,14 @@ class UR5AssemblyEnv(gym.Env):
             
     def close(self):
         """关闭环境"""
+        # 关闭相机视图窗口
+        if self.show_camera_view and self.camera_window_name:
+            try:
+                import cv2
+                cv2.destroyWindow(self.camera_window_name)
+            except Exception as e:
+                print(f"Warning: Failed to close camera window: {e}")
+                
         if self.physics_client_id is not None:
             p.disconnect(physicsClientId=self.physics_client_id)
             
@@ -381,6 +422,27 @@ class UR5AssemblyEnv(gym.Env):
             return self.assembly_task.get_task_info()
         return {}
         
+    def _update_camera_view(self):
+        """更新相机视图窗口"""
+        if not self.show_camera_view or not self.camera_window_name:
+            return
+            
+        try:
+            import cv2
+            
+            # 获取RGB图像
+            rgb_image = self.camera.get_rgb_image(self.physics_client_id)
+            
+            # 转换BGR格式（OpenCV使用BGR）
+            bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
+            
+            # 显示图像
+            cv2.imshow(self.camera_window_name, bgr_image)
+            cv2.waitKey(1)  # 更新窗口，1ms延迟
+            
+        except Exception as e:
+            print(f"Warning: Failed to update camera view: {e}")
+            
     def save_camera_image(self, filename: str, image_type: str = "rgb"):
         """保存相机图像"""
         if self.camera:

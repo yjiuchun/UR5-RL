@@ -134,10 +134,10 @@ class AssemblyTask:
         insertion_depth = self._calculate_insertion_depth()
         
         # 计算装配质量
-        self.assembly_quality = self._calculate_assembly_quality()
+        self.assembly_quality = self._calculate_assembly_quality(relative_position, relative_orientation, insertion_depth)
         
         # 检查是否完成
-        self.assembly_completed = self._check_completion()
+        self.assembly_completed = self._check_completion(relative_position, relative_orientation, insertion_depth)
         
         return {
             'peg_position': np.array(peg_pos),
@@ -168,23 +168,21 @@ class AssemblyTask:
         
         return max(0.0, min(insertion_depth, self.hole_depth))
         
-    def _calculate_assembly_quality(self) -> float:
+    def _calculate_assembly_quality(self, relative_position=None, relative_orientation=None, insertion_depth=None) -> float:
         """计算装配质量（0-1之间）"""
-        task_state = self.get_task_state()
-        
-        if not task_state:
+        if relative_position is None or relative_orientation is None or insertion_depth is None:
             return 0.0
             
         # 位置误差
-        position_error = np.linalg.norm(task_state['relative_position'][:2])  # 只考虑XY平面
+        position_error = np.linalg.norm(relative_position[:2])  # 只考虑XY平面
         position_quality = max(0, 1 - position_error / self.hole_radius)
         
         # 方向误差
-        orientation_error = np.linalg.norm(task_state['relative_orientation'])
+        orientation_error = np.linalg.norm(relative_orientation)
         orientation_quality = max(0, 1 - orientation_error / (np.pi / 4))
         
         # 插入深度质量
-        insertion_quality = task_state['insertion_depth'] / self.hole_depth
+        insertion_quality = insertion_depth / self.hole_depth
         
         # 综合质量
         overall_quality = (position_quality * 0.4 + 
@@ -193,25 +191,23 @@ class AssemblyTask:
         
         return np.clip(overall_quality, 0, 1)
         
-    def _check_completion(self) -> bool:
+    def _check_completion(self, relative_position=None, relative_orientation=None, insertion_depth=None) -> bool:
         """检查任务是否完成"""
-        task_state = self.get_task_state()
-        
-        if not task_state:
+        if relative_position is None or relative_orientation is None or insertion_depth is None:
             return False
             
         # 检查位置误差
-        position_error = np.linalg.norm(task_state['relative_position'][:2])
+        position_error = np.linalg.norm(relative_position[:2])
         if position_error > self.position_threshold:
             return False
             
         # 检查方向误差
-        orientation_error = np.linalg.norm(task_state['relative_orientation'])
+        orientation_error = np.linalg.norm(relative_orientation)
         if orientation_error > self.orientation_threshold:
             return False
             
         # 检查插入深度
-        if task_state['insertion_depth'] < self.insertion_threshold:
+        if insertion_depth < self.insertion_threshold:
             return False
             
         return True

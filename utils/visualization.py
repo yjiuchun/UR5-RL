@@ -18,10 +18,12 @@ def plot_joint_trajectory(joint_history: np.ndarray, joint_names: List[str] = No
     if joint_names is None:
         joint_names = [f"Joint {i+1}" for i in range(joint_history.shape[1])]
     
+    
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+
     axes = axes.flatten()
     
-    for i in range(joint_history.shape[1]):
+    for i in range(6):
         ax = axes[i]
         ax.plot(joint_history[:, i], linewidth=2)
         ax.set_title(joint_names[i])
